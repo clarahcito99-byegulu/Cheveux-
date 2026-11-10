@@ -230,6 +230,21 @@ legend{font-size:13px;font-weight:700;color:var(--muted);padding:0;margin-bottom
 .fab{position:fixed;z-index:8;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));height:54px;padding:0 22px 0 18px;border-radius:99px;border:0;background:var(--accent);color:var(--accent-fg);font-weight:800;font-size:15px;display:flex;align-items:center;gap:8px;box-shadow:0 8px 22px rgba(58,36,24,.3)}
 #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(86px + env(safe-area-inset-bottom,0px));z-index:30;background:var(--fg);color:var(--bg);padding:10px 18px;border-radius:99px;font-size:14px;font-weight:700;max-width:calc(100% - 32px);text-align:center}
 @media (prefers-reduced-motion:reduce){*{transition:none !important;animation:none !important}}
+
+/* produits */
+.prow{align-items:center}
+.pbar{display:block;height:6px;border-radius:99px;background:var(--surface2);overflow:hidden;margin-top:6px}
+.pbar i{display:block;height:100%;border-radius:99px;background:var(--accent)}
+.stepper{flex:none;display:flex;align-items:center;gap:6px}
+.stepper b{min-width:22px;text-align:center;font-variant-numeric:tabular-nums;font-weight:800}
+.step{width:38px;height:38px;border-radius:50%;border:0;background:var(--surface2);color:var(--accent);font-size:22px;line-height:1;font-weight:700}
+.step:last-child{background:var(--accent);color:var(--accent-fg)}
+.step:disabled{opacity:.35;cursor:default}
+.curbox{display:flex;align-items:center;gap:8px}
+.curbox label{margin:0}
+.sugg{display:flex;flex-wrap:wrap;gap:6px}
+.chkline{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--fg);font-weight:700;margin:0}
+.chkline input{width:22px;height:22px;accent-color:var(--accent);flex:none}
 </style>
 </head>
 <body>
@@ -320,9 +335,9 @@ function defaultRules(){return{
   hydrate:{on:true,every:1,days:[2],start:"2027-01-06",title:"Hydratation"},
   wash:{on:true,every:2,days:[5],start:"2027-01-02",title:"Wash day"},
   braids:{on:false,every:6,days:[5],start:"2027-01-09",title:"Tresses"},
-  pay:{on:true,day:5,amount:"",title:"Produits cheveux"}
+  pay:{on:false,day:5,amount:"",title:"Produits cheveux"}
 }}
-function defaultState(){return{v:1,updated:0,events:[],rules:defaultRules(),why:"",notes:[],months:{},currency:"$"}}
+function defaultState(){return{v:1,updated:0,events:[],rules:defaultRules(),why:"",notes:[],months:{},currency:"$",products:[]}}
 function normalize(x){
   var s=defaultState();
   if(!x||typeof x!=="object")return s;
@@ -333,6 +348,7 @@ function normalize(x){
   s.months=(x.months&&typeof x.months==="object")?x.months:{};
   s.why=typeof x.why==="string"?x.why:"";
   s.currency=(typeof x.currency==="string"&&x.currency)?x.currency.slice(0,6):"$";
+  s.products=Array.isArray(x.products)?x.products.filter(function(p){return p&&typeof p.name==="string"}).map(function(p){return{id:String(p.id||uid()),name:p.name.slice(0,60),qty:Math.max(1,parseInt(p.qty,10)||1),price:Math.max(0,Number(p.price)||0),buys:Array.isArray(p.buys)?p.buys.map(function(b){return{d:String((b&&b.d)||""),p:Math.max(0,Number(b&&b.p)||0)}}):[]}}):[];
   s.updated=Number(x.updated)||0;
   return s;
 }
@@ -371,7 +387,7 @@ function doSave(){
   });
 }
 document.addEventListener("visibilitychange",function(){if(document.hidden&&dirty())flush()});
-function hasContent(s){return s.events.length>0||s.why||s.notes.length>0||Object.keys(s.months).length>0}
+function hasContent(s){return s.events.length>0||s.products.length>0||s.why||s.notes.length>0||Object.keys(s.months).length>0}
 function initCloud(){
   Promise.resolve().then(function(){
     if(!(window.claude&&window.claude.use)){cloud="local";return}
@@ -590,20 +606,90 @@ function viewRoutine(){
     '<div class="bar"><button class="btn primary" data-act="apply">Mettre à jour mon calendrier</button><p>Les soins déjà cochés ou modifiés à la main ne sont pas touchés. Les autres sont recalculés avec tes réglages.</p></div>';
 }
 
+function findProd(id){return S.products.find(function(p){return p.id===id})}
+function prodStats(p){var sp=0;p.buys.forEach(function(b){sp+=b.p});return{bought:p.buys.length,spent:sp,budget:p.qty*p.price}}
+function adjustBuys(p,n){while(p.buys.length<n)p.buys.push({d:TODAY,p:p.price});while(p.buys.length>n)p.buys.pop()}
+function focusStep(id,act){var el=document.querySelector('[data-act="'+act+'"][data-id="'+id+'"]');if(el)el.focus()}
+function prodRow(p){
+  var st=prodStats(p),pct=Math.min(100,Math.round(st.bought/p.qty*100)),tag="";
+  if(st.bought>p.qty)tag='<span class="tag">'+(st.bought-p.qty)+' en plus</span>';
+  else if(st.bought===p.qty)tag='<span class="tag" style="color:var(--accent)">Complet</span>';
+  var sub=st.bought+" sur "+p.qty+" · "+money(p.price)+" l'unité"+(st.spent?" · dépensé "+money(st.spent):"");
+  return '<div class="row prow">'+
+    '<button class="rowmain" data-act="editProd" data-id="'+p.id+'"><span class="rt"><span class="tt">'+esc(p.name)+'</span>'+tag+'</span><span class="rs" style="padding-left:0">'+sub+'</span><span class="pbar" aria-hidden="true"><i style="width:'+pct+'%"></i></span></button>'+
+    '<div class="stepper"><button class="step" data-act="prodMinus" data-id="'+p.id+'" aria-label="Retirer un achat : '+esc(p.name)+'"'+(st.bought?'':' disabled')+'>&minus;</button><b>'+st.bought+'</b><button class="step" data-act="prodPlus" data-id="'+p.id+'" aria-label="Ajouter un achat : '+esc(p.name)+'">+</button></div></div>';
+}
 function viewPaiements(){
+  var ps=S.products,bud=0,sp=0;
+  ps.forEach(function(p){var s=prodStats(p);bud+=s.budget;sp+=s.spent});
+  var left=bud-sp;
+  var h='<section class="card"><div class="chead"><h2>Mes produits</h2><div class="curbox"><label for="cur">Devise</label><input type="text" id="cur" class="curin" value="'+esc(S.currency)+'" maxlength="6"></div></div>';
+  h+='<div class="sums"><div><b>'+money(bud)+'</b><span>budget prévu</span></div><div><b>'+money(sp)+'</b><span>dépensé</span></div><div><b>'+money(Math.abs(left))+'</b><span>'+(left<0?"dépassé":"reste")+'</span></div></div>';
+  if(ps.length){
+    h+='<div class="rows" style="margin-top:8px">'+ps.map(prodRow).join("")+'</div><div style="margin-top:12px"><button class="btn primary" data-act="newProd">Ajouter un produit</button></div>';
+  }else{
+    h+='<div class="empty" style="margin-top:14px"><p><b>Liste tes produits pour l\'année.</b></p><p class="muted">Par exemple 5 leave-in, 5 pots de shampoing. Indique le prix, puis touche + à chaque achat pour suivre ce que tu dépenses.</p><button class="btn primary" data-act="newProd">Ajouter un produit</button></div>';
+  }
+  h+='</section>';
   var pays=S.events.filter(function(e){return e.type==="pay"}).sort(evSort);
   var plan=0,paid=0;pays.forEach(function(e){var a=Number(e.amount)||0;plan+=a;if(e.done)paid+=a});
-  var h='<section class="card"><div class="chead"><h2>Paiements 2027</h2><span class="muted" style="font-size:13px"><label for="cur" style="display:inline;margin-right:6px">Devise</label></span></div>'+
-    '<div class="two" style="margin-bottom:12px"><div><input type="text" id="cur" class="curin" value="'+esc(S.currency)+'" maxlength="6" aria-label="Devise"></div></div>'+
-    '<div class="sums"><div><b>'+money(plan)+"</b><span>prévu</span></div><div><b>"+money(paid)+"</b><span>payé</span></div><div><b>"+money(plan-paid)+"</b><span>reste</span></div></div></section>";
-  if(!pays.length)return h+'<div class="empty"><p><b>Aucun paiement prévu.</b></p><p class="muted">Ajoute un produit à payer, ou règle un paiement mensuel dans la routine.</p><button class="btn primary" data-act="newPay">Ajouter un paiement</button></div>';
+  h+='<section class="card"><h2>Paiements planifiés</h2>';
+  if(pays.length){
+    h+='<div class="sums" style="margin-top:10px"><div><b>'+money(plan)+'</b><span>prévu</span></div><div><b>'+money(paid)+'</b><span>payé</span></div><div><b>'+money(plan-paid)+'</b><span>reste</span></div></div>';
+  }else{
+    h+='<p class="muted" style="margin:6px 0 0">Pour un achat à date fixe (commande, abonnement), ajoute un paiement avec sa date.</p>';
+  }
+  h+='<div style="margin-top:12px"><button class="btn" data-act="newPay">Ajouter un paiement</button></div></section>';
   for(var m=0;m<12;m++){
     var list=pays.filter(function(e){return e.date.slice(0,7)===monthKey(m)});
     if(!list.length)continue;
     var tot=0;list.forEach(function(e){tot+=Number(e.amount)||0});
-    h+='<section class="card"><div class="chead"><h3>'+MONTHS[m]+'</h3><span class="muted" style="font-size:13px">'+money(tot)+'</span></div><div class="rows">'+list.map(function(e){return row(e)}).join("")+"</div></section>";
+    h+='<section class="card"><div class="chead"><h3>'+MONTHS[m]+'</h3><span class="muted" style="font-size:13px">'+money(tot)+'</span></div><div class="rows">'+list.map(function(e){return row(e)}).join("")+'</div></section>';
   }
   return h;
+}
+function openProduct(editId){
+  lastFocus=document.activeElement;
+  sheetState={kind:"product",editId:editId||null};
+  $("sheet").hidden=false;document.body.style.overflow="hidden";
+  renderSheet();$("panel").focus();
+}
+function renderProdForm(){
+  var ss=sheetState,ed=ss.editId?findProd(ss.editId):null;
+  var name=ed?ed.name:"",qty=ed?ed.qty:"",price=ed?ed.price:"",bought=ed?ed.buys.length:0;
+  var sug=["Leave-in","Shampoing","Après-shampoing","Masque","Huile","Crème coiffante"];
+  $("sheetForm").innerHTML='<form id="prodForm" novalidate>'+
+    (ed?"":'<fieldset><legend>Idées</legend><div class="sugg">'+sug.map(function(n){return'<button type="button" class="mchip" data-act="sugg" data-name="'+esc(n)+'">'+esc(n)+'</button>'}).join("")+'</div></fieldset>')+
+    '<div><label for="pName">Nom du produit</label><input type="text" id="pName" name="name" value="'+esc(name)+'" maxlength="60" placeholder="Ex. : Leave-in hydratant" autocomplete="off"></div>'+
+    '<div class="two"><div><label for="pQty">Combien pour l\'année ?</label><input type="text" inputmode="numeric" id="pQty" name="qty" value="'+esc(qty)+'" placeholder="5"></div>'+
+    '<div><label for="pPrice">Prix d\'un produit ('+esc(S.currency)+')</label><input type="text" inputmode="decimal" id="pPrice" name="price" value="'+esc(price)+'" placeholder="0"></div></div>'+
+    '<div><label for="pBought">Déjà achetés</label><input type="text" inputmode="numeric" id="pBought" name="bought" value="'+bought+'"></div>'+
+    ((ed&&bought)?'<label class="chkline"><input type="checkbox" name="reprice"> Appliquer ce prix aussi aux achats déjà faits</label>':"")+
+    '<p id="formErr" role="alert"></p><div class="actions"><button class="btn primary" type="submit">'+(ed?"Enregistrer":"Ajouter")+'</button>'+
+    (ed?'<button class="btn danger" type="button" data-act="delProd" data-id="'+ed.id+'">Supprimer</button>':"")+
+    '<button class="btn" type="button" data-act="close">Fermer</button></div></form>';
+}
+function submitProd(form){
+  var fd=new FormData(form),err=$("formErr"),name=String(fd.get("name")||"").trim();
+  var qty=parseInt(String(fd.get("qty")||"").trim(),10);
+  var pr=String(fd.get("price")||"").replace(",",".").replace(/\s/g,""),price=pr===""?0:parseFloat(pr);
+  var bt=String(fd.get("bought")||"").trim(),bought=bt===""?0:parseInt(bt,10);
+  if(!name){err.textContent="Écris le nom du produit.";return}
+  if(!(qty>=1)||qty>999){err.textContent="Indique combien tu en veux pour l'année (entre 1 et 999).";return}
+  if(isNaN(price)||price<0){err.textContent="Le prix doit être un nombre, par exemple 12 ou 12,50.";return}
+  if(isNaN(bought)||bought<0||bought>999){err.textContent="Le nombre déjà achetés doit être 0 ou plus.";return}
+  var ss=sheetState,p;
+  if(ss.editId){
+    p=findProd(ss.editId);if(!p)return;
+    p.name=name;p.qty=qty;p.price=price;
+    if(fd.get("reprice"))p.buys.forEach(function(b){b.p=price});
+    adjustBuys(p,bought);
+    touch();render();closeSheet();toast("Produit modifié");
+  }else{
+    p={id:uid(),name:name,qty:qty,price:price,buys:[]};
+    adjustBuys(p,bought);S.products.push(p);
+    touch();render();closeSheet();toast("Produit ajouté");
+  }
 }
 
 function viewCarnet(){
@@ -651,14 +737,14 @@ function registerSW(){try{if("serviceWorker" in navigator&&location.protocol.ind
 function persistStore(){try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}}
 
 var VIEWS={mois:viewMois,annee:viewAnnee,routine:viewRoutine,paiements:viewPaiements,carnet:viewCarnet};
-var TABS=[["mois","Mois"],["annee","Année"],["routine","Routine"],["paiements","Paiements"],["carnet","Carnet"]];
+var TABS=[["mois","Mois"],["annee","Année"],["routine","Routine"],["paiements","Budget"],["carnet","Carnet"]];
 function render(){
   renderHead();
   $("tabs").innerHTML=TABS.map(function(t){return'<button class="tab" role="tab" data-act="tab" data-tab="'+t[0]+'" aria-selected="'+(ui.tab===t[0])+'">'+t[1]+"</button>"}).join("");
   $("view").innerHTML=VIEWS[ui.tab]();
   var fab=$("fab");
   fab.hidden=!(ui.tab==="mois"||ui.tab==="annee"||ui.tab==="paiements");
-  $("fabLabel").textContent=ui.tab==="paiements"?"Paiement":"Ajouter";
+  $("fabLabel").textContent=ui.tab==="paiements"?"Produit":"Ajouter";
   if(ui.tab==="routine")["hydrate","wash","braids","pay"].forEach(updateCount);
   setStatus();
 }
@@ -689,11 +775,13 @@ function closeSheet(){
 }
 function renderSheet(){
   var ss=sheetState;
+  if(ss.kind==="product"){$("sheetTitle").textContent=ss.editId?"Modifier le produit":"Nouveau produit";$("sheetList").innerHTML="";renderProdForm();return}
   $("sheetTitle").textContent=ss.editId?"Modifier":cap(fLong.format(parse(ss.date)));
   renderSheetList();renderForm();
 }
 function renderSheetList(){
   var box=$("sheetList");
+  if(sheetState.kind==="product"){box.innerHTML="";return}
   if(sheetState.editId){box.innerHTML="";return}
   var evs=S.events.filter(function(e){return e.date===sheetState.date}).sort(evSort);
   box.innerHTML=evs.length?'<div class="rows">'+evs.map(function(e){return row(e,{date:false})}).join("")+"</div>":'<p class="muted" style="margin:0">Rien de prévu ce jour-là.</p>';
@@ -741,7 +829,7 @@ document.addEventListener("click",function(e){
     case"prev":ui.month=Math.max(0,ui.month-1);render();break;
     case"next":ui.month=Math.min(11,ui.month+1);render();break;
     case"day":openSheet(b.dataset.date);break;
-    case"fab":openSheet(defaultDate(),null,ui.tab==="paiements"?"pay":null);break;
+    case"fab":if(ui.tab==="paiements")openProduct();else openSheet(defaultDate());break;
     case"newPay":openSheet(defaultDate(),null,"pay");break;
     case"toggle":ev=findEv(id);if(ev){ev.done=!ev.done;touch();render();if(sheetState)renderSheetList()}break;
     case"edit":ev=findEv(id);if(ev)openSheet(ev.date,ev.id);break;
@@ -749,6 +837,15 @@ document.addEventListener("click",function(e){
     case"openMonth":ui.month=Number(b.dataset.m);ui.tab="mois";render();window.scrollTo(0,0);break;
     case"goRoutine":ui.tab="routine";render();window.scrollTo(0,0);break;
     case"apply":var n=applyRules();ui.tab="mois";render();window.scrollTo(0,0);toast(n+" rendez-vous ajouté"+(n>1?"s":"")+" à ton calendrier");break;
+    case"newProd":openProduct();break;
+    case"editProd":openProduct(id);break;
+    case"prodPlus":var pp=findProd(id);if(pp){pp.buys.push({d:TODAY,p:pp.price});touch();render();focusStep(id,"prodPlus")}break;
+    case"prodMinus":var pm=findProd(id);if(pm&&pm.buys.length){pm.buys.pop();touch();render();focusStep(id,pm.buys.length?"prodMinus":"prodPlus")}break;
+    case"sugg":var ni=$("pName");if(ni){ni.value=b.dataset.name;ni.focus()}break;
+    case"delProd":
+      if(b.dataset.armed){S.products=S.products.filter(function(x){return x.id!==id});touch();render();closeSheet();toast("Produit supprimé")}
+      else{b.dataset.armed="1";b.classList.add("armed");b.textContent="Confirmer la suppression";clearTimeout(armTimer);armTimer=setTimeout(function(){if(b.isConnected){delete b.dataset.armed;b.classList.remove("armed");b.textContent="Supprimer"}},4000)}
+      break;
     case"exportFile":doExportFile();break;
     case"exportCopy":doExportCopy();break;
     case"importText":doImport(b);break;
@@ -793,7 +890,7 @@ function onInput(e){
 }
 document.addEventListener("input",onInput);
 document.addEventListener("change",onInput);
-document.addEventListener("submit",function(e){if(e.target.id==="evForm"){e.preventDefault();submitForm(e.target)}});
+document.addEventListener("submit",function(e){if(e.target.id==="evForm"){e.preventDefault();submitForm(e.target)}else if(e.target.id==="prodForm"){e.preventDefault();submitProd(e.target)}});
 document.addEventListener("keydown",function(e){
   if($("sheet").hidden)return;
   if(e.key==="Escape"){closeSheet();return}

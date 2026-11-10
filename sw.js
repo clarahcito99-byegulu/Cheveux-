@@ -1,6 +1,6 @@
 // Service worker : garde l'application disponible sans connexion.
 // Pour forcer une mise a jour apres modification des fichiers, change le numero de VERSION.
-var VERSION = "carnet-cheveux-v1";
+var VERSION = "carnet-cheveux-v2";
 var FILES = [
   "./", "index.html", "manifest.webmanifest",
   "icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png", "favicon-32.png",
